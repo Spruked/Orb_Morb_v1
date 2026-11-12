@@ -95,7 +95,7 @@ Every bound grant contains two independently enforced scopes:
 
 - **Every worker in a bound grant holds the finalization right.** Membership is the set of workers in the grant, with no exceptions in either direction: no worker may hold execution rights without the right to report, and holding no execution capabilities does not remove the right to report.
 - **The content of the finalization right is fixed by this contract, not configurable per grant.** It permits only SubmitReport for the worker's own terminal report, and evidence items the worker acquired before revocation. It MUST NOT permit tool invocation, new evidence acquisition, or any consequential action.
-- **The host enforces both scopes at the moment of use.** Holding a grant object that describes a finalization right is not permission. After revocation, brokered calls are refused with `execution_revoked`. Evidence items submitted under finalization MUST trace to invocation records the host logged under that grant before revocation; findings with no evidence trail are accepted only as the worker's claims, attributed and unverified. Submissions after the window are refused with `finalization_closed`.
+- **The host enforces both scopes at the moment of use.** Holding a grant object that describes a finalization right is not permission. After revocation, brokered calls are refused with `execution_revoked`. Evidence items submitted under finalization MUST trace to a host-held source: either an invocation record the host logged under that grant before revocation, or mission-supplied material the host recorded with its digest at Assign. Material cited from the mission keeps the provenance and verification status it had when the host supplied it; the worker's analysis of it is the worker's own attributed finding. Anything else is accepted only as the worker's claim, attributed and unverified, never as evidence. Submissions after the window are refused with `finalization_closed`.
 
 ### 5.4 Capability broker
 
@@ -257,7 +257,7 @@ When several workers of one type are requested, the engine proposes a task split
 
 ## 10. Assign → approval → Deploy
 
-1. **Assign.** The host sends the mission. The engine returns assignments in ASSIGNED and a grant proposal. Nothing is authorized.
+1. **Assign.** The host sends the mission, including any mission-supplied material, which the host records in its ledger with digest and provenance. The engine returns assignments in ASSIGNED and a grant proposal. Nothing is authorized.
 2. **Approval.** The owner (manual deployment) or CALI within an owner-authorized scope (automatic deployment) approves the proposal, possibly narrowed.
 3. **Deploy.** The host binds the approved worker identities to their scopes, registers the bound grant through governance and the Vault, records it in the ledger, and sends it with Deploy. Assignments move to RUNNING.
 4. **Change.** Any later scope change is a new grant revision; the old revision is revoked and `authority_changed` is published.
@@ -293,7 +293,7 @@ The host takes custody of a submission the moment it durably stages it; from the
 
 1. The engine calls SubmitReport for evidence items, then for the report that references them.
 2. The host authenticates lease and epoch, validates the bound grant (or finalization scope), worker attribution and schema, and computes all digests itself.
-3. The host verifies that every evidence reference in a report resolves to a staged or sealed evidence item with the expected digest (`evidence_unresolved` otherwise).
+3. The host verifies that every evidence reference in a report resolves, with the expected digest, to a staged or sealed evidence item or to mission-supplied material recorded at Assign (`evidence_unresolved` otherwise).
 4. The host durably stages the submission in a bounded preservation queue, and only then returns `report_accepted`. A full queue refuses with `preservation_backlog`; nothing accepted is ever dropped.
 5. A.I.M.S. seals referenced evidence first; a report is never sealed while mandatory evidence is unpreserved.
 6. A.I.M.S. seals the report and returns its authenticated receipt.
@@ -492,6 +492,7 @@ Bryan Spruk authorized engineering work on 2026-11-12. That authorization is not
 | Deep immutability of grants; structured refusals only | §5.2, §6.4 | Claude review of PR #1 |
 | Restricted canonical subset, honestly not "full RFC 8785" | §13.3 | GPT-6 implementation round 2 |
 | Finalization membership stated explicitly; fixed finalization content; host enforcement and evidence trace at use; at least one worker per grant | §5.2, §5.3 | Muse review at 3c5d50d (A citation, E, F) |
+| Mission-supplied material recorded at Assign counts as a traceable evidence source | §5.3, §10, §12.2 | Muse follow-up on the D/E boundary |
 | Owner register marked pending: engineering authorization is not value approval | §19, status | GPT-6 review of PR #2 |
 
 Revision 2's resolved-disagreements record stands; the points above were agreed without dispute.

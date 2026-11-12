@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| Status | Revision 3. Reconciled by Claude and GPT-6 through owner-relayed review; the reviewed work was approved by Bryan Spruk on 2026-11-12 (see §19). Implementation proceeds on development branches; integration into running systems is a separate checkpoint. |
+| Status | Revision 3. Reconciled by Claude and GPT-6 through owner-relayed review. Bryan Spruk authorized engineering work on 2026-11-12; the owner decisions in §19 remain pending his explicit confirmation. Implementation proceeds on development branches; integration into running systems is a separate checkpoint. |
 | Supersedes | Revision 2 (review document, 2026-11-12) |
 | Normative language | MUST, MUST NOT, SHOULD, MAY as in RFC 2119 |
 | Scope of this file | The interface between a host ORB and a MORB engine. It is the source of truth for code in this repository; where code and this file disagree, this file changes first, through its own pull request. |
@@ -448,21 +448,21 @@ Passing in simulation proves the contract, not authorized production behavior; t
 
 ## 19. Owner approval register
 
-Bryan Spruk approved the reviewed contract work on 2026-11-12. The register records the values that approval adopted; operational values remain configurable.
+Bryan Spruk authorized engineering work on 2026-11-12. That authorization is not approval of the individual values below: each is a recommended value, pending his explicit confirmation. Implementations use them as configurable defaults until then.
 
-| # | Decision | Adopted value | Note |
+| # | Decision | Recommended value | Status |
 | --- | --- | --- | --- |
-| 1 | Glyph | One glyph family; TPC/ACP 18-dimensional glyph via a versioned interface | Conditional on read-only inspection (§13.4) |
-| 2 | Canonical serialization | Restricted subset coinciding with RFC 8785 (§13.3), SHA-256, per-mission genesis | |
-| 3 | Host seal | Authenticated A.I.M.S. receipt after host validation | |
-| 4 | Grant authority | Cognitive/Governance decides; the Vault registers and validates | |
-| 5 | Mission workspace retention | 7 days after seal; never purged while unconfirmed | Configurable |
-| 6 | Drain window | 5 minutes | Configurable |
-| 7 | Large evidence | Separate vault records referenced by digest and id | |
-| 8 | Version 1 fleet | 4 visible, up to 8 concurrent; Orbit, Escort, Triad, Stealth, Hidden but Active, Custom | Operational configuration, not contract |
-| 9 | First-engine trust profile | `trusted_local`, shown in DockStation; `isolated` for third parties | |
-| 10 | Receipt authentication | Ed25519 signature by the vault | |
-| 11 | Preservation deadline | 24 hours before Unpreserved and owner alert | Proposed default; confirm with Bryan |
+| 1 | Glyph | One glyph family; TPC/ACP 18-dimensional glyph via a versioned interface | Pending; also conditional on read-only inspection (§13.4) |
+| 2 | Canonical serialization | Restricted subset coinciding with RFC 8785 (§13.3), SHA-256, per-mission genesis | Pending |
+| 3 | Host seal | Authenticated A.I.M.S. receipt after host validation | Pending |
+| 4 | Grant authority | Cognitive/Governance decides; the Vault registers and validates | Pending |
+| 5 | Mission workspace retention | 7 days after seal; never purged while unconfirmed | Pending; configurable |
+| 6 | Drain window | 5 minutes | Pending; configurable |
+| 7 | Large evidence | Separate vault records referenced by digest and id | Pending |
+| 8 | Version 1 fleet | 4 visible, up to 8 concurrent; Orbit, Escort, Triad, Stealth, Hidden but Active, Custom | Pending; operational configuration, not contract |
+| 9 | First-engine trust profile | `trusted_local`, shown in DockStation; `isolated` for third parties | Pending |
+| 10 | Receipt authentication | Ed25519 signature by the vault | Pending |
+| 11 | Preservation deadline | 24 hours before Unpreserved and owner alert | Pending; Claude's recommended default |
 
 ## 20. Changes from revision 2
 
@@ -480,5 +480,6 @@ Bryan Spruk approved the reviewed contract work on 2026-11-12. The register reco
 | Assignment lifecycle separated from worker availability; ASSIGNED → FAILED | §8.1, §8.2 | Claude review of PR #1 |
 | Deep immutability of grants; structured refusals only | §5.2, §6.4 | Claude review of PR #1 |
 | Restricted canonical subset, honestly not "full RFC 8785" | §13.3 | GPT-6 implementation round 2 |
+| Owner register marked pending: engineering authorization is not value approval | §19, status | GPT-6 review of PR #2 |
 
 Revision 2's resolved-disagreements record stands; the points above were agreed without dispute.

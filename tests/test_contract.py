@@ -1,82 +1,190 @@
-"""Draft conformance tests: pure contract behavior, no live runtime."""
+"""Pure MORB contract conformance tests; never execute consequential work."""
+from dataclasses import FrozenInstanceError
 import unittest
 
 from morb_contract import (
-    CONTRACT_VERSION, EventAuthority, FleetState, HOST_ONLY_EVENTS,
-    MessageEnvelope, MissionGrantDescription, PreservationState,
-    ProtocolViolation, RecordIdentity, RecordKind, WorkerState,
-    require_epoch, require_fleet_transition, require_worker_transition,
+    AssignmentState, BoundGrant, CONTRACT_VERSION, EVENT_AUTHORITY, EventAuthority,
+    FleetState, GrantProposal, HOST_ONLY_EVENTS, InvocationId, MessageEnvelope,
+    PreservationState, ProtocolViolation, RecordIdentity, RecordKind, RequestId,
+    require_assignment_transition, require_epoch, require_fleet_transition,
 )
 
+ASSIGNMENT_ALLOWED = {
+    AssignmentState.ASSIGNED: {AssignmentState.RUNNING, AssignmentState.FAILED, AssignmentState.CANCELLED},
+    AssignmentState.RUNNING: {AssignmentState.COMPLETING, AssignmentState.FAILED, AssignmentState.CANCELLED},
+    AssignmentState.COMPLETING: {AssignmentState.COMPLETED, AssignmentState.FAILED, AssignmentState.CANCELLED},
+    AssignmentState.COMPLETED: set(),
+    AssignmentState.FAILED: set(),
+    AssignmentState.CANCELLED: set(),
+}
+FLEET_ALLOWED = {
+    FleetState.OFF: {FleetState.ACTIVE},
+    FleetState.ACTIVE: {FleetState.DRAINING, FleetState.STOPPED},
+    FleetState.DRAINING: {FleetState.OFF, FleetState.STOPPED},
+    FleetState.STOPPED: {FleetState.OFF},
+}
 
-class ContractModelTests(unittest.TestCase):
-    def test_envelope_accepts_canonical_epoch(self):
-        e = MessageEnvelope(CONTRACT_VERSION, "request-1", "host", "fleet-1", "22")
+
+class ContractTests(unittest.TestCase):
+    def test_envelope_accepts_epoch_and_request_id(self):
+        e = MessageEnvelope(CONTRACT_VERSION, RequestId("r-1"), "host", "fleet-1", "22")
         self.assertEqual(e.epoch, "22")
+        self.assertIsInstance(e.request_id, RequestId)
 
-    def test_epoch_rejects_noncanonical_numbers(self):
-        for epoch in ("01", "-1", "1.0", " 1", "", 1):
-            with self.subTest(epoch=epoch), self.assertRaises(ProtocolViolation):
-                require_epoch(epoch)
+    def test_invalid_epoch(self):
+        for value in ("01", "-1", "1.0", " 1", "", 1, True, None):
+            with self.subTest(value=value), self.assertRaises(ProtocolViolation):
+                require_epoch(value)
 
-    def test_envelope_rejects_missing_sender(self):
+    def test_malformed_envelopes_are_protocol_violations(self):
+        bad = [
+            (CONTRACT_VERSION, RequestId("ok"), "", "fleet", "1", None),
+            (CONTRACT_VERSION, RequestId("ok"), "host", "fleet", "1", 5),
+            (CONTRACT_VERSION, "not-a-RequestId", "host", "fleet", "1", None),
+            (CONTRACT_VERSION, RequestId("ok"), "host", "fleet", "1", " "),
+        ]
+        for args in bad:
+            with self.subTest(args=args), self.assertRaises(ProtocolViolation):
+                MessageEnvelope(*args)
+
+    def test_request_and_invocation_id_types_are_distinct(self):
+        self.assertNotEqual(type(RequestId("x")), type(InvocationId("x")))
         with self.assertRaises(ProtocolViolation):
-            MessageEnvelope(CONTRACT_VERSION, "r1", "", "fleet", "1")
+            MessageEnvelope(CONTRACT_VERSION, InvocationId("x"), "host", "fleet", "1")
+        for cls in (RequestId, InvocationId):
+            for value in ("", " ", 42):
+                with self.subTest(cls=cls, value=value), self.assertRaises(ProtocolViolation):
+                    cls(value)
 
-    def test_assign_then_run(self):
-        require_worker_transition(WorkerState.AVAILABLE, WorkerState.ASSIGNED)
-        require_worker_transition(WorkerState.ASSIGNED, WorkerState.RUNNING)
-        require_worker_transition(WorkerState.RUNNING, WorkerState.COMPLETING)
-        require_worker_transition(WorkerState.COMPLETING, WorkerState.COMPLETED)
+    def test_assignment_transition_complete_sweep(self):
+        self.assertEqual(set(ASSIGNMENT_ALLOWED), set(AssignmentState))
+        for old in AssignmentState:
+            for new in AssignmentState:
+                with self.subTest(old=old, new=new):
+                    if new in ASSIGNMENT_ALLOWED[old]:
+                        require_assignment_transition(old, new)
+                    else:
+                        with self.assertRaisesRegex(ProtocolViolation, "invalid_worker_transition"):
+                            require_assignment_transition(old, new)
 
-    def test_worker_cannot_claim_completion_before_work(self):
-        with self.assertRaises(ProtocolViolation):
-            require_worker_transition(WorkerState.ASSIGNED, WorkerState.COMPLETED)
+    def test_fleet_transition_complete_sweep(self):
+        for old in FleetState:
+            for new in FleetState:
+                with self.subTest(old=old, new=new):
+                    if new in FLEET_ALLOWED[old]:
+                        require_fleet_transition(old, new)
+                    else:
+                        with self.assertRaisesRegex(ProtocolViolation, "invalid_fleet_transition"):
+                            require_fleet_transition(old, new)
 
-    def test_worker_terminal_assignment_cannot_restart(self):
-        with self.assertRaises(ProtocolViolation):
-            require_worker_transition(WorkerState.COMPLETED, WorkerState.RUNNING)
+    def test_unknown_states_are_structured_violations(self):
+        for before, after in (("bogus", AssignmentState.RUNNING), (AssignmentState.RUNNING, "bogus"), (None, None)):
+            with self.subTest(before=before, after=after), self.assertRaisesRegex(ProtocolViolation, "unknown_state"):
+                require_assignment_transition(before, after)
+        with self.assertRaisesRegex(ProtocolViolation, "unknown_state"):
+            require_fleet_transition("bogus", FleetState.ACTIVE)
 
-    def test_cancel_before_deploy(self):
-        require_worker_transition(WorkerState.ASSIGNED, WorkerState.CANCELLED)
+    def test_grant_proposal_is_not_a_permission(self):
+        p = GrantProposal("mission", {"read_log"}, {"worker": {"read_log"}})
+        self.assertFalse(hasattr(p, "describes_execution_scope"))
+        self.assertFalse(hasattr(p, "grant_id"))
+        self.assertEqual(p.worker_requests["worker"], frozenset({"read_log"}))
 
-    def test_fleet_activation_does_not_create_workers(self):
-        require_fleet_transition(FleetState.OFF, FleetState.ACTIVE)
+    def test_proposal_immutability_copies_caller_data(self):
+        scopes = {"worker": {"read_log"}}
+        allowed = {"read_log"}
+        p = GrantProposal("mission", allowed, scopes)
+        scopes["worker"].add("restart_server")
+        scopes["new"] = {"restart_server"}
+        allowed.add("restart_server")
+        self.assertEqual(set(p.worker_requests), {"worker"})
+        self.assertEqual(p.worker_requests["worker"], frozenset({"read_log"}))
+        self.assertEqual(p.requested_capabilities, frozenset({"read_log"}))
+        with self.assertRaises(TypeError):
+            p.worker_requests["new"] = frozenset()
 
-    def test_drain_and_stop_are_distinct(self):
-        require_fleet_transition(FleetState.ACTIVE, FleetState.DRAINING)
-        require_fleet_transition(FleetState.DRAINING, FleetState.OFF)
-        require_fleet_transition(FleetState.ACTIVE, FleetState.STOPPED)
-        with self.assertRaises(ProtocolViolation):
-            require_fleet_transition(FleetState.STOPPED, FleetState.ACTIVE)
+    def test_bound_grant_immutability_copies_caller_data(self):
+        allowed = {"read_log", "status"}
+        scopes = {"worker": {"read_log"}}
+        finalization = {"worker"}
+        g = BoundGrant("mission", "grant", 1, "17", allowed, scopes, finalization)
+        scopes["worker"].add("restart_server")
+        scopes["ghost"] = {"status"}
+        allowed.add("restart_server")
+        finalization.add("ghost")
+        self.assertEqual(g.execution_capabilities, frozenset({"read_log", "status"}))
+        self.assertEqual(g.worker_execution_scopes["worker"], frozenset({"read_log"}))
+        self.assertEqual(set(g.worker_execution_scopes), {"worker"})
+        self.assertFalse(g.describes_execution_scope("worker", "restart_server"))
+        self.assertFalse(g.describes_execution_scope("ghost", "status"))
+        self.assertTrue(g.describes_finalization_scope("worker"))
+        self.assertFalse(g.describes_finalization_scope("ghost"))
+        with self.assertRaises(TypeError):
+            g.worker_execution_scopes["worker"] = frozenset({"restart_server"})
+        with self.assertRaises(FrozenInstanceError):
+            g.revision = 2
 
-    def test_worker_scope_must_be_subset(self):
-        with self.assertRaises(ProtocolViolation):
-            MissionGrantDescription("mission", 1, frozenset({"read_logs"}), {"worker": frozenset({"restart_server"})})
+    def test_worker_scope_can_only_narrow(self):
+        with self.assertRaisesRegex(ProtocolViolation, "worker_scope_exceeds_grant"):
+            BoundGrant("m", "g", 1, "1", {"read_log"}, {"w": {"restart_server"}}, {"w"})
+        with self.assertRaisesRegex(ProtocolViolation, "worker_scope_exceeds_grant"):
+            GrantProposal("m", {"read_log"}, {"w": {"restart_server"}})
 
-    def test_worker_restriction_and_attribution(self):
-        g = MissionGrantDescription("mission", 2, frozenset({"read_logs", "read_status"}), {
-            "diagnostic": frozenset({"read_logs"}), "observer": frozenset({"read_status"})
-        })
-        self.assertTrue(g.describes_permission("diagnostic", "read_logs"))
-        self.assertFalse(g.describes_permission("diagnostic", "read_status"))
-        self.assertFalse(g.describes_permission("unknown", "read_logs"))
+    def test_finalization_scope_not_unrelated_worker(self):
+        with self.assertRaisesRegex(ProtocolViolation, "invalid_finalization_scope"):
+            BoundGrant("m", "g", 1, "1", {"read_log"}, {"w": {"read_log"}}, {"ghost"})
 
-    def test_distinct_record_namespaces(self):
-        identities = [RecordIdentity(kind, "mission", "worker", "1").parts() for kind in RecordKind]
-        self.assertEqual(len(set(identities)), len(RecordKind))
+    def test_bound_grant_revision_rejects_bool(self):
+        for revision in (True, False, 0, -1, "1", None, 1.5):
+            with self.subTest(revision=revision), self.assertRaisesRegex(ProtocolViolation, "invalid_grant_revision"):
+                BoundGrant("m", "g", revision, "1", {"read_log"}, {"w": {"read_log"}}, {"w"})
 
-    def test_report_identity_distinguishes_workers(self):
-        a = RecordIdentity(RecordKind.REPORT, "mission", "worker-a", "1").parts()
-        b = RecordIdentity(RecordKind.REPORT, "mission", "worker-b", "1").parts()
-        self.assertNotEqual(a, b)
+    def test_grant_malformed_inputs(self):
+        cases = [
+            (5, "g", 1, "1", {"read_log"}, {"w": {"read_log"}}, {"w"}),
+            ("m", " ", 1, "1", {"read_log"}, {"w": {"read_log"}}, {"w"}),
+            ("m", "g", 1, 1, {"read_log"}, {"w": {"read_log"}}, {"w"}),
+            ("m", "g", 1, "1", "read_log", {"w": {"read_log"}}, {"w"}),
+            ("m", "g", 1, "1", {"read_log"}, ["w"], {"w"}),
+            ("m", "g", 1, "1", {"read_log"}, {7: {"read_log"}}, {"w"}),
+        ]
+        for case in cases:
+            with self.subTest(case=case), self.assertRaises(ProtocolViolation):
+                BoundGrant(*case)
 
-    def test_preservation_does_not_equal_work_outcome(self):
+    def test_record_identity_namespaces_are_distinct(self):
+        ids = [RecordIdentity(kind, "mission", "worker", "1").parts() for kind in RecordKind]
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_record_identity_invalid_values_are_structured(self):
+        for kind, mission, worker, item in (
+            ("report", "m", "w", "1"),
+            (RecordKind.REPORT, " ", "w", "1"),
+            (RecordKind.REPORT, "m", 5, "1"),
+            (RecordKind.REPORT, "m", "w", ""),
+        ):
+            with self.subTest(kind=kind), self.assertRaises(ProtocolViolation):
+                RecordIdentity(kind, mission, worker, item)
+
+    def test_event_authority_covers_all_spec_events(self):
+        expected = {
+            "operational_state_changed", "finding_shared", "worker_state", "fleet_state_changed",
+            "mission_assigned", "report_accepted", "result_delivered", "mission_terminal",
+            "authority_changed", "error", "presentation_state_changed",
+        }
+        self.assertEqual(set(EVENT_AUTHORITY), expected)
+        self.assertEqual({k for k, v in EVENT_AUTHORITY.items() if v is EventAuthority.HOST_AUTHORITATIVE}, HOST_ONLY_EVENTS)
+        self.assertEqual(EVENT_AUTHORITY["result_delivered"], EventAuthority.HOST_AUTHORITATIVE)
+        self.assertEqual(EVENT_AUTHORITY["operational_state_changed"], EventAuthority.ENGINE_ADVISORY)
+        self.assertEqual(EVENT_AUTHORITY["presentation_state_changed"], EventAuthority.PRESENTATION_ONLY)
+
+    def test_event_authority_is_immutable(self):
+        with self.assertRaises(TypeError):
+            EVENT_AUTHORITY["result_delivered"] = EventAuthority.ENGINE_ADVISORY
+
+    def test_preservation_independent_of_work(self):
+        self.assertEqual(PreservationState.PENDING.value, "pending")
         self.assertNotEqual(PreservationState.PENDING, PreservationState.SEALED)
-
-    def test_result_delivered_is_host_only(self):
-        self.assertIn("result_delivered", HOST_ONLY_EVENTS)
-        self.assertEqual(EventAuthority.HOST_AUTHORITATIVE.value, "host_authoritative")
 
 
 if __name__ == "__main__":

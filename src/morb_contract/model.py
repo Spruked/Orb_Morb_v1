@@ -25,6 +25,8 @@ class ProtocolViolation(ValueError):
 def _text(value: object, reason: str) -> str:
     if not isinstance(value, str) or not value.strip() or value != value.strip():
         raise ProtocolViolation(reason)
+    if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+        raise ProtocolViolation(reason)
     return value
 
 
@@ -196,7 +198,6 @@ class BoundGrant:
     epoch: str
     execution_capabilities: frozenset[str]
     worker_execution_scopes: Mapping[str, frozenset[str]]
-    finalization_workers: frozenset[str]
 
     def __post_init__(self) -> None:
         _text(self.mission_id, "invalid_grant_identity")
@@ -206,12 +207,24 @@ class BoundGrant:
         require_epoch(self.epoch)
         caps = _id_collection(self.execution_capabilities, "invalid_capability_name")
         scopes = _scoped_workers(self.worker_execution_scopes, caps, "worker_scope_exceeds_grant")
-        final = _id_collection(self.finalization_workers, "invalid_worker_identity")
-        if not final.issubset(scopes.keys()):
-            raise ProtocolViolation("invalid_finalization_scope")
         object.__setattr__(self, "execution_capabilities", caps)
         object.__setattr__(self, "worker_execution_scopes", scopes)
-        object.__setattr__(self, "finalization_workers", final)
+
+    @property
+    def finalization_workers(self) -> frozenset[str]:
+        """Every assigned worker can submit terminal evidence, even with zero tools."""
+        return frozenset(self.worker_execution_scopes.keys())
+
+    def __hash__(self) -> int:
+        """In-process object hash only. NEVER use for persistent record integrity."""
+        ordered_scopes = tuple(sorted(
+            (worker, tuple(sorted(capabilities)))
+            for worker, capabilities in self.worker_execution_scopes.items()
+        ))
+        return hash((
+            self.mission_id, self.grant_id, self.revision, self.epoch,
+            self.execution_capabilities, ordered_scopes,
+        ))
 
     def describes_execution_scope(self, worker_id: str, capability: str) -> bool:
         """Static scope description only; never a live authorization verdict."""

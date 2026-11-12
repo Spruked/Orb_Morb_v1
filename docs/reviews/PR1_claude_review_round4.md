@@ -23,5 +23,9 @@ Anything else is accepted only as an attributed unverified claim.
 Next: simulated host, opening with
 1. revoked grant: the same BoundGrant object is refused with `execution_revoked`;
 2. after Cancel, a brokered tool call is refused even though `describes_finalization_scope` is True;
-3. provenance table: cited M with matching digest → accepted with M's provenance;
-   altered digest → `evidence_unresolved`; E with no M and no invocation record → unverified claim.
+3. provenance table, covering both trace branches (amended per Muse's review):
+   - invocation branch: E citing an invocation record logged before revocation → accepted;
+     E citing a record logged after revocation, or a nonexistent record → not evidence;
+   - mission-supplied branch: cited M with matching digest → accepted with M's provenance;
+     altered digest → `evidence_unresolved`;
+   - no trail: E with no M and no invocation record → attributed unverified claim.

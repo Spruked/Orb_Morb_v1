@@ -1,17 +1,16 @@
-"""MORB host-neutral draft interface primitives; no execution authority."""
-
+"""Versioned MORB draft protocol models, no live authority."""
 from .model import (
-    CONTRACT_VERSION, PROTOCOL_STATUS, EventAuthority, FleetState,
-    HOST_ONLY_EVENTS, MessageEnvelope, MissionGrantDescription,
-    PreservationState, ProtocolViolation, RecordIdentity, RecordKind,
-    WorkerState, WorkOutcome, require_epoch, require_fleet_transition,
-    require_worker_transition,
+    AssignmentState, BoundGrant, CONTRACT_VERSION, EVENT_AUTHORITY, EventAuthority,
+    FleetState, GrantProposal, HOST_ONLY_EVENTS, InvocationId, MessageEnvelope,
+    PreservationState, PROTOCOL_STATUS, ProtocolViolation, RecordIdentity, RecordKind,
+    RequestId, WorkOutcome, require_assignment_transition, require_epoch,
+    require_fleet_transition,
 )
 
 __all__ = [
-    "CONTRACT_VERSION", "PROTOCOL_STATUS", "EventAuthority", "FleetState",
-    "HOST_ONLY_EVENTS", "MessageEnvelope", "MissionGrantDescription",
-    "PreservationState", "ProtocolViolation", "RecordIdentity", "RecordKind",
-    "WorkerState", "WorkOutcome", "require_epoch", "require_fleet_transition",
-    "require_worker_transition",
+    "AssignmentState", "BoundGrant", "CONTRACT_VERSION", "EVENT_AUTHORITY", "EventAuthority",
+    "FleetState", "GrantProposal", "HOST_ONLY_EVENTS", "InvocationId", "MessageEnvelope",
+    "PreservationState", "PROTOCOL_STATUS", "ProtocolViolation", "RecordIdentity", "RecordKind",
+    "RequestId", "WorkOutcome", "require_assignment_transition", "require_epoch",
+    "require_fleet_transition",
 ]

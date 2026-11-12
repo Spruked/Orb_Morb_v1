@@ -132,7 +132,15 @@ Every mutating command is idempotent under its `request_id` while the host retai
 
 ### 6.4 Errors
 
-Every refusal or malformed input MUST surface as a structured refusal with a reason code (in code: `ProtocolViolation(reason_code)`), never as a language-level exception. Reason codes are lowercase snake_case, optionally followed by `:detail` fields. Initial codes include `missing_envelope_field`, `invalid_epoch`, `stale_epoch`, `unknown_state`, `invalid_worker_transition`, `invalid_fleet_transition`, `worker_scope_exceeds_grant`, `grant_not_bound`, `execution_revoked`, `finalization_closed`, `preservation_backlog`, `record_conflict`, `evidence_unresolved`, `capability_refused`, `outcome_unknown`.
+Every refusal or malformed input MUST surface as a structured refusal with a reason code (in code: `ProtocolViolation(reason_code)`), never as a language-level exception. Reason codes are lowercase snake_case, optionally followed by `:detail` fields. Registered codes (add new ones through a spec change before or with the code that uses them):
+
+| Group | Codes |
+| --- | --- |
+| Envelope and identity | `missing_envelope_field`, `invalid_epoch`, `stale_epoch`, `invalid_request_id`, `invalid_invocation_id`, `invalid_mission_id` |
+| Lifecycle | `unknown_state`, `invalid_worker_transition`, `invalid_fleet_transition` |
+| Grants | `invalid_grant_identity`, `invalid_grant_revision`, `invalid_worker_identity`, `invalid_worker_scopes`, `invalid_capability_name`, `worker_scope_exceeds_grant`, `invalid_finalization_scope`, `grant_not_bound` |
+| Execution | `execution_revoked`, `finalization_closed`, `capability_refused`, `outcome_unknown` |
+| Custody | `invalid_record_kind`, `invalid_record_identity`, `preservation_backlog`, `record_conflict`, `evidence_unresolved` |
 
 ## 7. Operations and events
 

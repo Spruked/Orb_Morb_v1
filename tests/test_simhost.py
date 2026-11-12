@@ -9,7 +9,7 @@ from morb_contract import (
     BoundGrant, GrantProposal, InvocationId, ProtocolViolation,
     RecordIdentity, RecordKind,
 )
-from morb_simhost import EvidenceOrigin, EvidenceSubmission, SimulatedHost
+from morb_simhost import EvidenceOrigin, EvidenceRejection, EvidenceSubmission, SimulatedHost
 
 
 class SimhostTests(unittest.TestCase):
@@ -75,6 +75,11 @@ class SimhostTests(unittest.TestCase):
             self.grant, "ops", "read_status", InvocationId("inv-before"),
         )
         self.host.host_cancel(self.grant.grant_id)
+        # Post-revocation invocation evidence cannot be created through
+        # this broker: any such request is refused before logging.
+        with self.assertRaisesRegex(ProtocolViolation, "^execution_revoked$"):
+            self.host.request_capability(self.grant, "ops", "read_status", InvocationId("inv-after"))
+        self.assertNotIn(("grant-1", "ops", "inv-after"), self.host._invocations)
         record = self.evidence(
             "ops", "E-I", EvidenceOrigin.HOST_INVOCATION, "inv-before", output,
         )
@@ -91,7 +96,7 @@ class SimhostTests(unittest.TestCase):
             self.grant, "research", "I claim E exists", [untraced],
         )
         self.assertEqual(receipt.provenance_accepted, ())
-        self.assertEqual(receipt.provenance_rejected, (untraced.record,))
+        self.assertEqual(receipt.provenance_rejected, (EvidenceRejection(untraced.record, "evidence_unresolved:source_not_found"),))
         self.assertFalse(receipt.claim_verified)
         self.assertEqual(receipt.worker_id, "research")
         self.assertEqual(receipt.worker_claim, "I claim E exists")
@@ -104,7 +109,7 @@ class SimhostTests(unittest.TestCase):
         receipt = self.host.submit_finalization(
             self.grant, "research", "My analysis", [manipulated],
         )
-        self.assertEqual(receipt.provenance_rejected, (manipulated.record,))
+        self.assertEqual(receipt.provenance_rejected, (EvidenceRejection(manipulated.record, "evidence_unresolved:digest_mismatch"),))
 
     def test_invocation_reference_cannot_be_reused_by_another_worker(self):
         result = self.host.request_capability(
@@ -118,7 +123,7 @@ class SimhostTests(unittest.TestCase):
             self.grant, "research", "Claim about another worker", [stolen],
         )
         self.assertEqual(receipt.provenance_accepted, ())
-        self.assertEqual(receipt.provenance_rejected, (stolen.record,))
+        self.assertEqual(receipt.provenance_rejected, (EvidenceRejection(stolen.record, "evidence_unresolved:source_not_found"),))
 
     def test_zero_tool_worker_may_finalize_but_never_invoke(self):
         self.host.host_cancel(self.grant.grant_id)
@@ -181,6 +186,90 @@ class SimhostTests(unittest.TestCase):
             host.host_approve_and_deploy("m", "g", {"other": set()})
         with self.assertRaisesRegex(ProtocolViolation, "^worker_scope_exceeds_grant$"):
             host.host_approve_and_deploy("m", "g", {"w": {"not_approved"}})
+
+    def test_rejected_evidence_has_distinct_missing_and_digest_reason_codes(self):
+        self.host.host_cancel(self.grant.grant_id)
+        missing = self.evidence("research", "missing", EvidenceOrigin.MISSION_SUPPLIED, "absent", b"anything")
+        altered = self.evidence("research", "altered", EvidenceOrigin.MISSION_SUPPLIED, "M", b"changed")
+        result = self.host.submit_finalization(self.grant, "research", "Not verified", [missing, altered])
+        self.assertEqual(
+            result.provenance_rejected,
+            (
+                EvidenceRejection(missing.record, "evidence_unresolved:source_not_found"),
+                EvidenceRejection(altered.record, "evidence_unresolved:digest_mismatch"),
+            ),
+        )
+        self.assertEqual(result.provenance_accepted, ())
+        self.assertFalse(result.claim_verified)
+
+    def test_one_finalization_per_worker_prevents_rewrite(self):
+        self.host.host_cancel(self.grant.grant_id)
+        first = self.host.submit_finalization(self.grant, "research", "first", [])
+        self.assertEqual(first.worker_claim, "first")
+        with self.assertRaisesRegex(ProtocolViolation, "^record_conflict$"):
+            self.host.submit_finalization(self.grant, "research", "rewritten", [])
+        self.assertEqual(len(self.host._reports), 1)
+
+    def test_identical_finalization_retry_is_idempotent(self):
+        self.host.host_cancel(self.grant.grant_id)
+        original = self.host.submit_finalization(self.grant, "research", "same", [])
+        repeated = self.host.submit_finalization(self.grant, "research", "same", [])
+        self.assertIs(original, repeated)
+        self.assertEqual(len(self.host._reports), 1)
+        # Another assigned worker may still submit its own report.
+        second_worker = self.host.submit_finalization(self.grant, "ops", "separate", [])
+        self.assertEqual(second_worker.worker_id, "ops")
+        self.assertEqual(len(self.host._reports), 2)
+
+    def test_duplicate_evidence_identity_with_different_bytes_is_record_conflict(self):
+        self.host.host_cancel(self.grant.grant_id)
+        original = self.evidence(
+            "research", "E1", EvidenceOrigin.MISSION_SUPPLIED, "M", b"mission-supplied-material"
+        )
+        altered = self.evidence(
+            "research", "E1", EvidenceOrigin.MISSION_SUPPLIED, "M", b"changed"
+        )
+        with self.assertRaisesRegex(ProtocolViolation, "^record_conflict$"):
+            self.host.submit_finalization(self.grant, "research", "claim", [original, altered])
+        self.assertEqual(self.host._reports, [])
+
+    def test_duplicate_evidence_identity_with_different_origin_is_record_conflict(self):
+        self.host.host_cancel(self.grant.grant_id)
+        original = self.evidence(
+            "research", "E1", EvidenceOrigin.MISSION_SUPPLIED, "M", b"mission-supplied-material"
+        )
+        changed_source = self.evidence(
+            "research", "E1", EvidenceOrigin.MISSION_SUPPLIED, "other", b"mission-supplied-material"
+        )
+        with self.assertRaisesRegex(ProtocolViolation, "^record_conflict$"):
+            self.host.submit_finalization(self.grant, "research", "claim", [original, changed_source])
+
+    def test_identical_duplicate_evidence_is_normalized_and_retryable(self):
+        self.host.host_cancel(self.grant.grant_id)
+        item = self.evidence(
+            "research", "E1", EvidenceOrigin.MISSION_SUPPLIED, "M", b"mission-supplied-material"
+        )
+        first = self.host.submit_finalization(self.grant, "research", "claim", [item, item])
+        retried = self.host.submit_finalization(self.grant, "research", "claim", [item])
+        self.assertIs(first, retried)
+        self.assertEqual(first.provenance_accepted, (item.record,))
+        self.assertEqual(len(self.host._reports), 1)
+
+    def test_approval_narrows_top_level_capabilities_to_worker_union(self):
+        host = SimulatedHost({"read_status": b"status", "read_logs": b"logs"})
+        host.host_assign(
+            GrantProposal("m2", {"read_status", "read_logs"},
+                          {"ops": {"read_status", "read_logs"}, "observer": set()}),
+            {},
+        )
+        grant = host.host_approve_and_deploy(
+            "m2", "g2", {"ops": {"read_status"}, "observer": set()}
+        )
+        self.assertEqual(grant.execution_capabilities, frozenset({"read_status"}))
+        self.assertEqual(grant.worker_execution_scopes["ops"], frozenset({"read_status"}))
+        self.assertTrue(grant.describes_finalization_scope("observer"))
+        with self.assertRaisesRegex(ProtocolViolation, "^capability_refused$"):
+            host.request_capability(grant, "ops", "read_logs", InvocationId("denied"))
 
     def test_unknown_report_evidence_type_rejected_at_boundary(self):
         with self.assertRaisesRegex(ProtocolViolation, "^invalid_record_identity$"):

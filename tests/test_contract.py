@@ -124,6 +124,27 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             g.revision = 2
 
+    def test_no_worker_proposal_or_bound_grant_is_refused(self):
+        cases = [
+            lambda: GrantProposal("mission", set(), {}),
+            lambda: GrantProposal("mission", {"read_log"}, {}),
+            lambda: BoundGrant("mission", "grant", 1, "3", set(), {}),
+            lambda: BoundGrant("mission", "grant", 1, "3", {"read_log"}, {}),
+        ]
+        for index, construct in enumerate(cases):
+            with self.subTest(case=index), self.assertRaisesRegex(
+                ProtocolViolation, "^invalid_worker_scopes$"
+            ):
+                construct()
+
+    def test_one_worker_with_zero_execution_capabilities_is_valid(self):
+        proposal = GrantProposal("mission", set(), {"observer": set()})
+        grant = BoundGrant("mission", "grant", 1, "3", set(), {"observer": set()})
+        self.assertEqual(set(proposal.worker_requests), {"observer"})
+        self.assertEqual(set(grant.worker_execution_scopes), {"observer"})
+        self.assertFalse(grant.describes_execution_scope("observer", "anything"))
+        self.assertTrue(grant.describes_finalization_scope("observer"))
+
     def test_worker_scope_can_only_narrow(self):
         with self.assertRaisesRegex(ProtocolViolation, "worker_scope_exceeds_grant"):
             BoundGrant("m", "g", 1, "1", {"read_log"}, {"w": {"restart_server"}})

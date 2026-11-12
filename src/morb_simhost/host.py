@@ -43,6 +43,13 @@ class EvidenceSubmission:
 
 
 @dataclass(frozen=True)
+class EvidenceRejection:
+    """A provenance failure, not a verdict about the worker's claim."""
+    record: RecordIdentity
+    reason_code: str
+
+
+@dataclass(frozen=True)
 class SimulatedReportResult:
     """Not a Vault receipt. An attributed claim is never proof of truth."""
     mission_id: str
@@ -50,7 +57,7 @@ class SimulatedReportResult:
     worker_claim: str
     claim_verified: bool
     provenance_accepted: tuple[RecordIdentity, ...]
-    provenance_rejected: tuple[RecordIdentity, ...]
+    provenance_rejected: tuple[EvidenceRejection, ...]
 
 
 @dataclass(frozen=True)
@@ -86,6 +93,12 @@ class SimulatedHost:
         self._finalization_closed: set[str] = set()
         self._invocations: dict[tuple[str, str, str], _Invocation] = {}
         self._reports: list[SimulatedReportResult] = []
+        # One terminal report per (grant, worker); identical retries return
+        # the original in-memory result without creating a second record.
+        self._finalizations: dict[
+            tuple[str, str],
+            tuple[tuple[str, tuple[EvidenceSubmission, ...]], SimulatedReportResult],
+        ] = {}
 
     def host_assign(self, proposal: GrantProposal, mission_material: Mapping[str, bytes]) -> None:
         """Host records material digests at Assign; proposals authorize nothing."""
@@ -116,19 +129,26 @@ class SimulatedHost:
         else:
             if not isinstance(approved_worker_scopes, Mapping):
                 raise ProtocolViolation("invalid_worker_scopes")
-            selected = approved_worker_scopes
-            for worker, capabilities in selected.items():
+            selected = {}
+            for worker, capabilities in approved_worker_scopes.items():
                 if worker not in proposal.worker_requests:
                     raise ProtocolViolation("invalid_worker_scopes")
+                if not isinstance(capabilities, (set, frozenset, tuple, list)):
+                    raise ProtocolViolation("invalid_capability_name")
                 try:
                     requested = frozenset(capabilities)
                 except (TypeError, ValueError):
                     raise ProtocolViolation("invalid_capability_name") from None
                 if not requested.issubset(proposal.worker_requests[worker]):
                     raise ProtocolViolation("worker_scope_exceeds_grant")
+                selected[worker] = requested
+        # Describe only capabilities actually approved for at least one worker.
+        effective_capabilities = frozenset(
+            capability for worker_caps in selected.values() for capability in worker_caps
+        )
         grant = BoundGrant(
             mission_id, grant_id, 1, self.epoch,
-            proposal.requested_capabilities, selected,
+            effective_capabilities, selected,
         )
         self._grants[grant_id] = grant
         return grant
@@ -198,26 +218,56 @@ class SimulatedHost:
             raise ProtocolViolation("invalid_record_identity")
         if not isinstance(evidence, (tuple, list)):
             raise ProtocolViolation("invalid_record_identity")
-        accepted: list[RecordIdentity] = []
-        rejected: list[RecordIdentity] = []
+        # Check all evidence identities before committing any report state.
+        # Exact repeated entries are collapsed; a conflicting record payload
+        # or provenance source under the same identity is a hard conflict.
+        seen: dict[RecordIdentity, EvidenceSubmission] = {}
+        normalized: list[EvidenceSubmission] = []
         for item in evidence:
             if not isinstance(item, EvidenceSubmission):
                 raise ProtocolViolation("invalid_record_identity")
             if item.record.mission_id != canonical.mission_id or item.record.worker_id != worker_id:
                 raise ProtocolViolation("invalid_record_identity")
+            prior = seen.get(item.record)
+            if prior is not None:
+                if prior != item:
+                    raise ProtocolViolation("record_conflict")
+                continue
+            seen[item.record] = item
+            normalized.append(item)
+
+        submission = (claim, tuple(normalized))
+        finalization_key = (canonical.grant_id, worker_id)
+        existing = self._finalizations.get(finalization_key)
+        if existing is not None:
+            if existing[0] == submission:
+                return existing[1]
+            raise ProtocolViolation("record_conflict")
+
+        accepted: list[RecordIdentity] = []
+        rejected: list[EvidenceRejection] = []
+        for item in normalized:
             digest = sha256(item.content).hexdigest()
-            trusted = False
+            expected_digest: str | None
             if item.origin is EvidenceOrigin.MISSION_SUPPLIED:
-                trusted = self._assigned_material.get(
+                expected_digest = self._assigned_material.get(
                     (canonical.mission_id, item.source_id)
-                ) == digest
-            elif item.origin is EvidenceOrigin.HOST_INVOCATION:
+                )
+            else:
                 logged = self._invocations.get((canonical.grant_id, worker_id, item.source_id))
-                trusted = logged is not None and logged.digest == digest
-            (accepted if trusted else rejected).append(item.record)
+                expected_digest = logged.digest if logged is not None else None
+
+            if expected_digest is None:
+                rejected.append(EvidenceRejection(item.record, "evidence_unresolved:source_not_found"))
+            elif expected_digest != digest:
+                rejected.append(EvidenceRejection(item.record, "evidence_unresolved:digest_mismatch"))
+            else:
+                accepted.append(item.record)
+
         result = SimulatedReportResult(
             canonical.mission_id, worker_id, claim, False,
             tuple(accepted), tuple(rejected),
         )
+        self._finalizations[finalization_key] = (submission, result)
         self._reports.append(result)
         return result

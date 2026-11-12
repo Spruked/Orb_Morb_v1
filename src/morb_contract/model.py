@@ -42,7 +42,7 @@ def _id_collection(values: object, reason: str) -> frozenset[str]:
 def _scoped_workers(
     workers: object, allowed: frozenset[str], out_of_scope_reason: str
 ) -> Mapping[str, frozenset[str]]:
-    if not isinstance(workers, Mapping):
+    if not isinstance(workers, Mapping) or not workers:
         raise ProtocolViolation("invalid_worker_scopes")
     frozen: dict[str, frozenset[str]] = {}
     for worker_id, capabilities in workers.items():

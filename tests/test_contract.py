@@ -210,7 +210,7 @@ class ContractTests(unittest.TestCase):
 
     def test_contract_imports_only_stdlib_or_own_package(self):
         package = Path(__file__).resolve().parents[1] / "src" / "morb_contract"
-        allowed_stdlib = {"dataclasses", "enum", "re", "types", "typing"}
+        allowed_stdlib = {"__future__", "dataclasses", "enum", "re", "types", "typing"}
         for source in package.glob("*.py"):
             syntax = ast.parse(source.read_text(encoding="utf-8"))
             for node in ast.walk(syntax):

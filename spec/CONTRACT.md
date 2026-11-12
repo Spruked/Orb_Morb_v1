@@ -142,7 +142,7 @@ Every refusal or malformed input MUST surface as a structured refusal with a rea
 | Envelope and identity | `missing_envelope_field`, `invalid_epoch`, `stale_epoch`, `invalid_request_id`, `invalid_invocation_id`, `invalid_mission_id` |
 | Lifecycle | `unknown_state`, `invalid_worker_transition`, `invalid_fleet_transition` |
 | Grants | `invalid_grant_identity`, `invalid_grant_revision`, `invalid_worker_identity`, `invalid_worker_scopes`, `invalid_capability_name`, `worker_scope_exceeds_grant`, `invalid_finalization_scope`, `grant_not_bound` |
-| Execution | `execution_revoked`, `finalization_closed`, `capability_refused`, `outcome_unknown` |
+| Execution | `execution_revoked`, `finalization_not_open`, `finalization_closed`, `capability_refused`, `outcome_unknown` |
 | Custody | `invalid_record_kind`, `invalid_record_identity`, `preservation_backlog`, `record_conflict`, `evidence_unresolved` |
 
 ## 7. Operations and events
@@ -272,6 +272,10 @@ A test MUST show that a grant proposal alone never authorizes any capability.
 4. Within the window, a worker MAY submit a finalization report with evidence acquired before revocation. Brokered requests are refused with `execution_revoked`; submissions after the window are refused with `finalization_closed`.
 5. Independently of the worker, the host writes its own terminal record.
 6. Reports already accepted before the window closed continue through preservation.
+
+**Report kinds.** Work reports are sequenced (§12.1) and non-terminal; a worker may submit any number while its execution scope is live. Each worker has exactly one terminal report per grant: its completion report, or its finalization report if it was cancelled first. A second, different terminal report is refused with `record_conflict`.
+
+**The window is the only place a finalization report is accepted.** Before revocation it is refused with `finalization_not_open`; after the window closes, with `finalization_closed`. A retry with the same identity and digest as a report accepted inside the window returns the original acknowledgement even after the window has closed (§12.3); closing the window ends new submissions, not the record of accepted ones.
 
 Operations already running at revocation are reported as stopped, not stoppable, or outcome unknown.
 
@@ -494,5 +498,6 @@ Bryan Spruk authorized engineering work on 2026-11-12. That authorization is not
 | Finalization membership stated explicitly; fixed finalization content; host enforcement and evidence trace at use; at least one worker per grant | §5.2, §5.3 | Muse review at 3c5d50d (A citation, E, F) |
 | Mission-supplied material recorded at Assign counts as a traceable evidence source | §5.3, §10, §12.2 | Muse follow-up on the D/E boundary |
 | Owner register marked pending: engineering authorization is not value approval | §19, status | GPT-6 review of PR #2 |
+| Work vs terminal reports; one terminal report per worker per grant; finalization only inside the window; identical retry after close returns the original acknowledgement | §11, §6.4 | GPT-6 question on PR #2; Claude simhost review round 2 (K) |
 
 Revision 2's resolved-disagreements record stands; the points above were agreed without dispute.

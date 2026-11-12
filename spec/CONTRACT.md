@@ -81,6 +81,7 @@ Optional at the protocol level does not mean abandoned at the product level: the
 - A **grant proposal** is produced at Assign. It names the mission, proposed workers, task split and requested capabilities. A proposal MUST NOT be usable to answer any authorization question.
 - A **bound grant** is produced only at Deploy, after approval (§10). The host binds each approved worker identity to its scope, registers the grant through governance and the Vault, and stamps it with the current epoch and a revision number.
 - A worker scope MUST be a subset of its bound grant. The engine cannot change scopes. Any change is a new grant revision; the previous revision is revoked.
+- A grant proposal and a bound grant MUST each name at least one worker. A worker's execution scope MAY be empty: a worker whose task needs no consequential capability (for example, analysis of mission-supplied material) is still a worker with a right to report.
 - Grant objects MUST be deeply immutable once validated. An implementation that keeps a reference to caller-owned mutable data is non-conforming.
 
 ### 5.3 Execution and finalization scopes
@@ -92,7 +93,9 @@ Every bound grant contains two independently enforced scopes:
 | Execution | Invoking the worker's approved capabilities | Revoked immediately |
 | Finalization | Submitting terminal reports and evidence already acquired before revocation | Stays open for a bounded finalization window, then closes |
 
-The finalization scope MUST NOT permit tool invocation, new evidence acquisition, or any consequential action.
+- **Every worker in a bound grant holds the finalization right.** Membership is the set of workers in the grant, with no exceptions in either direction: no worker may hold execution rights without the right to report, and holding no execution capabilities does not remove the right to report.
+- **The content of the finalization right is fixed by this contract, not configurable per grant.** It permits only SubmitReport for the worker's own terminal report, and evidence items the worker acquired before revocation. It MUST NOT permit tool invocation, new evidence acquisition, or any consequential action.
+- **The host enforces both scopes at the moment of use.** Holding a grant object that describes a finalization right is not permission. After revocation, brokered calls are refused with `execution_revoked`. Evidence items submitted under finalization MUST trace to invocation records the host logged under that grant before revocation; findings with no evidence trail are accepted only as the worker's claims, attributed and unverified. Submissions after the window are refused with `finalization_closed`.
 
 ### 5.4 Capability broker
 
@@ -488,6 +491,7 @@ Bryan Spruk authorized engineering work on 2026-11-12. That authorization is not
 | Assignment lifecycle separated from worker availability; ASSIGNED → FAILED | §8.1, §8.2 | Claude review of PR #1 |
 | Deep immutability of grants; structured refusals only | §5.2, §6.4 | Claude review of PR #1 |
 | Restricted canonical subset, honestly not "full RFC 8785" | §13.3 | GPT-6 implementation round 2 |
+| Finalization membership stated explicitly; fixed finalization content; host enforcement and evidence trace at use; at least one worker per grant | §5.2, §5.3 | Muse review at 3c5d50d (A citation, E, F) |
 | Owner register marked pending: engineering authorization is not value approval | §19, status | GPT-6 review of PR #2 |
 
 Revision 2's resolved-disagreements record stands; the points above were agreed without dispute.
